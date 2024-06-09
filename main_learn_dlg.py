@@ -8,7 +8,7 @@ os.environ['KMP_WARNINGS'] = '0'
 # import cPickle as pickle
 import pickle
 import joblib
-
+import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -23,11 +23,13 @@ from models.vision import LeNetMnist, weights_init, LeNet
 from models.resnet import resnet20
 from logger import set_logger
 
+from torchvision.models import resnet18, resnet34, resnet50
+
 parser = argparse.ArgumentParser(description='Deep Leakage from Gradients.')
 parser.add_argument('--dataset', type=str, default="MNIST",
                     help='dataset to do the experiment')
-parser.add_argument('--model', type=str, default="MLP-3000",
-                    help='MLP-{hidden_size}')
+parser.add_argument('--model', type=str, default="MLP-3000", help='MLP-{hidden_size} or ResNet18/34/50')
+
 parser.add_argument('--shared_model', type=str, default="LeNet",
                     help='LeNet')
 parser.add_argument('--lr', type=float, default=1e-4,
@@ -215,6 +217,9 @@ if not os.path.exists(checkpoint_name):
     features, targets = leakage_dataset(test_loader)
     checkpoint["test_features"] = features
     checkpoint["test_targets"] = targets
+    dir_name = os.path.dirname(checkpoint_name)
+    if not os.path.exists(dir_name):
+        os.makedirs(dir_name)
     torch.save(checkpoint, checkpoint_name)
 else:
     checkpoint = torch.load(checkpoint_name)
@@ -309,22 +314,48 @@ for epoch in tqdm(range(args.epochs)):
         checkpoint["test_loss"] = test_loss
         checkpoint["reconstructed_imgs"] = reconstructed_imgs
         checkpoint["gt_data"] = gt_data
+        
+        # Set the checkpoint name based on the training set
         if args.trainset == "full":
-            torch.save(checkpoint, f"checkpoint/{args.dataset}_{args.shared_model}_{args.model}_{args.leak_mode}_{args.lr}_{args.epochs}_{args.batch_size}_best.pt")
+            checkpoint_name = f"checkpoint/{args.dataset}_{args.shared_model}_{args.model}_{args.leak_mode}_{args.lr}_{args.epochs}_{args.batch_size}_best.pt"
         else:
-            torch.save(checkpoint, f"checkpoint/{args.dataset}_{args.trainset}_{args.shared_model}_{args.model}_{args.leak_mode}_{args.lr}_{args.epochs}_{args.batch_size}.pt")
+            checkpoint_name = f"checkpoint/{args.dataset}_{args.trainset}_{args.shared_model}_{args.model}_{args.leak_mode}_{args.lr}_{args.epochs}_{args.batch_size}.pt"
+
+        # Ensure the directory exists before saving
+        dir_name = os.path.dirname(checkpoint_name)
+        if not os.path.exists(dir_name):
+            os.makedirs(dir_name)
+
+        # Save the checkpoint
+        torch.save(checkpoint, checkpoint_name)
+
+
     if (epoch+1) == int(0.75 * args.epochs):
         for g in optimizer.param_groups:
             g['lr'] *= 0.1
-checkpoint = {}
-checkpoint["train_loss"] = train_loss
-checkpoint["test_loss"] = test_loss
-checkpoint["state_dict"] = grad_to_img_net.state_dict()
-checkpoint["best_test_loss"] = best_test_loss
-checkpoint["best_state_dict"] = best_state_dict
-checkpoint["reconstructed_imgs"] = reconstructed_imgs
-checkpoint["gt_data"] = gt_data
+
+
+# Determine the checkpoint file path based on the training set
 if args.trainset == "full":
-    torch.save(checkpoint, f"checkpoint/{args.dataset}_{args.shared_model}_{args.model}_{args.leak_mode}_{args.lr}_{args.epochs}_{args.batch_size}.pt")
+    checkpoint_path = f"checkpoint/{args.dataset}_{args.shared_model}_{args.model}_{args.leak_mode}_{args.lr}_{args.epochs}_{args.batch_size}.pt"
 else:
-    torch.save(checkpoint, f"checkpoint/{args.dataset}_{args.trainset}_{args.shared_model}_{args.model}_{args.leak_mode}_{args.lr}_{args.epochs}_{args.batch_size}.pt")
+    checkpoint_path = f"checkpoint/{args.dataset}_{args.trainset}_{args.shared_model}_{args.model}_{args.leak_mode}_{args.lr}_{args.epochs}_{args.batch_size}.pt"
+
+# Ensure the parent directory exists
+checkpoint_dir = os.path.dirname(checkpoint_path)
+if not os.path.exists(checkpoint_dir):
+    os.makedirs(checkpoint_dir)
+
+# Prepare checkpoint data
+checkpoint = {
+    "train_loss": train_loss,
+    "test_loss": test_loss,
+    "state_dict": grad_to_img_net.state_dict(),
+    "best_test_loss": best_test_loss,
+    "best_state_dict": best_state_dict,
+    "reconstructed_imgs": reconstructed_imgs,
+    "gt_data": gt_data
+}
+
+# Save the checkpoint data to the specified file
+torch.save(checkpoint, checkpoint_path)

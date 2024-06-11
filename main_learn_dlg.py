@@ -25,6 +25,20 @@ from logger import set_logger
 
 from torchvision.models import resnet18, resnet34, resnet50
 
+
+class ModifiedResNet(nn.Module):
+    def __init__(self, base_model, input_size, num_classes):
+        super(ModifiedResNet, self).__init__()
+        self.fc = nn.Linear(input_size, 3 * 32 * 32)  # 将输入转换为32x32x3图像
+        self.base_model = base_model
+        self.base_model.fc = nn.Linear(self.base_model.fc.in_features, num_classes)
+        
+    def forward(self, x):
+        x = self.fc(x)
+        x = x.view(-1, 3, 32, 32)
+        x = self.base_model(x)
+        return x
+
 parser = argparse.ArgumentParser(description='Deep Leakage from Gradients.')
 parser.add_argument('--dataset', type=str, default="MNIST",
                     help='dataset to do the experiment')
@@ -250,8 +264,13 @@ print(prune_rate, leak_batch, sign, gauss_noise)
 #init the model
 torch.manual_seed(0)
 selected_para = torch.randperm(model_size)[:int(model_size * compress_rate)]
-if args.model.startswith("MLP"):
-    print(image_size)
+if args.model.startswith("ResNet18"):
+    base_model = resnet18(pretrained=True)
+elif args.model.startswith("ResNet34"):
+    base_model = resnet34(pretrained=True)
+elif args.model.startswith("ResNet50"):
+    base_model = resnet50(pretrained=True)
+elif args.model.startswith("MLP"):
     hidden_size = int(args.model.split("-")[-1])
     grad_to_img_net = nn.Sequential(
         nn.Linear(len(selected_para), hidden_size),
@@ -261,7 +280,9 @@ if args.model.startswith("MLP"):
         nn.Linear(hidden_size, image_size * leak_batch),
         torch.nn.Sigmoid()
     )
-    grad_to_img_net = grad_to_img_net.cuda()
+
+if args.model.startswith("ResNet"):
+    grad_to_img_net = ModifiedResNet(base_model, len(selected_para), image_size).cuda()
     
 size = 0
 for parameters in grad_to_img_net.parameters():

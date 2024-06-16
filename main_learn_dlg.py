@@ -22,8 +22,53 @@ from utils import label_to_onehot, cross_entropy_for_onehot
 from models.vision import LeNetMnist, weights_init, LeNet
 from models.resnet import resnet20
 from logger import set_logger
-
+import torchvision.utils as vutils
+# import matplotlib.pyplot as plt
+from pytorch_pretrained_biggan import (BigGAN, one_hot_from_names, truncated_noise_sample,
+                                       save_as_images, display_in_terminal)
 from torchvision.models import resnet18, resnet34, resnet50
+
+from pytorch_pretrained_biggan import one_hot_from_names
+
+# Utility function to convert gradients to noise vectors
+def gradients_to_noise(gradients, dim_z=128):
+    """Convert gradients to noise vectors."""
+    noise = gradients.view(-1, dim_z)
+    return noise
+
+def cifar_to_imagenet_class(labels):
+    """
+    Convert CIFAR-10 labels to corresponding ImageNet class vectors.
+    
+    Args:
+    labels (list or np.array): List or array of CIFAR-10 labels (integers from 0 to 9).
+    
+    Returns:
+    np.array: One-hot encoded vectors for ImageNet classes.
+    """
+    # CIFAR-10 classes
+    cifar10_classes = [
+        'airplane', 'automobile', 'bird', 'cat', 'deer',
+        'dog', 'frog', 'horse', 'ship', 'truck'
+    ]
+
+    # ImageNet classes corresponding to CIFAR-10 (approximate)
+    imagenet_classes = [
+        'airliner', 'sports car', 'robin', 'tabby cat', 'deer', 
+        'Labrador retriever', 'tree frog', 'Arabian camel', 'container ship', 'trailer truck'
+    ]
+
+    # Mapping from CIFAR-10 class index to ImageNet class name
+    cifar_to_imagenet_mapping = {i: imagenet_classes[i] for i in range(len(cifar10_classes))}
+    
+    # Convert CIFAR-10 labels to corresponding ImageNet class names
+    imagenet_labels = [cifar_to_imagenet_mapping[label] for label in labels]
+    
+    # Generate one-hot encoded class vectors for ImageNet classes
+    class_vector = one_hot_from_names(imagenet_labels, batch_size=len(labels))
+    
+    return class_vector
+
 
 
 class ModifiedResNet(nn.Module):
@@ -99,6 +144,112 @@ def train(grad_to_img_net, data_loader, sign=False, mask=None, prune_rate=None, 
     return total_loss
 
 
+def train_GAN(generator, data_loader, optimizer, criterion, sign=False, mask=None, prune_rate=None, leak_batch=1, device='cuda'):
+    generator.train()
+    total_loss = 0
+    total_num = 0
+    for i, (xs, ys, labels) in enumerate(tqdm(data_loader)):
+        optimizer.zero_grad()
+        batch_num = len(ys)
+        batch_size = int(batch_num / leak_batch)
+        batch_num = batch_size * leak_batch
+        total_num += batch_num
+        
+        xs, ys = xs[:batch_num].cuda(), ys[:batch_num].cuda()  # No need to select_para here
+        
+        if sign:
+            xs = torch.sign(xs)
+        if prune_rate is not None:
+            mask = torch.zeros(xs.size()).cuda()
+            rank = torch.argsort(xs.abs(), dim=1)[:, -int(xs.size()[1] * (1 - prune_rate)):]
+            mask[torch.arange(len(ys)).view(-1, 1).expand(rank.size()), rank] = 1
+        if mask is not None:
+            xs = xs * mask
+        if gauss_noise > 0:
+            xs = xs + torch.randn(*xs.shape).cuda() * gauss_noise
+        
+        xs = xs.view(batch_size, leak_batch, -1).mean(1)
+        ys = ys.view(batch_size, leak_batch, -1)
+        
+        noise = gradients_to_noise(xs, dim_z=128).to(device)
+        class_vector = cifar_to_imagenet_class(labels[:batch_num].cpu().numpy())
+        class_vector = torch.from_numpy(class_vector).to(device)
+        
+        fake_images = generator(noise, class_vector, truncation=0.4)
+        fake_images_resized = F.interpolate(fake_images, size=(32, 32))
+        
+        preds = fake_images_resized.view(batch_size, leak_batch, -1)
+        
+        batch_wise_mse = (torch.cdist(ys, preds) ** 2) / image_size
+        loss = 0
+        for mse_mat in batch_wise_mse:
+            row_ind, col_ind = linear_sum_assignment(mse_mat.detach().cpu().numpy())
+            loss += mse_mat[row_ind, col_ind].mean()
+        
+        loss /= batch_size
+        loss.backward()
+        optimizer.step()
+        total_loss += loss.item() * batch_num
+    
+    total_loss = total_loss / len(data_loader.dataset)
+    return total_loss
+
+def test_GAN(generator, data_loader, criterion, sign=False, mask=None, prune_rate=None, leak_batch=1, device='cuda'):
+    generator.eval()
+    total_loss = 0
+    total_num = 0
+    reconstructed_data = []
+    with torch.no_grad():
+        for i, (xs, ys, labels) in enumerate(tqdm(data_loader)):
+            batch_num = len(ys)
+            batch_size = int(batch_num / leak_batch)
+            batch_num = batch_size * leak_batch
+            total_num += batch_num
+            
+            xs, ys = xs[:batch_num].cuda(), ys[:batch_num].cuda()  # No need to select_para here
+            
+            if sign:
+                xs = torch.sign(xs)
+            if prune_rate is not None:
+                mask = torch.zeros(xs.size()).cuda()
+                rank = torch.argsort(xs.abs(), dim=1)[:, -int(xs.size()[1] * (1 - prune_rate)):]
+                mask[torch.arange(len(ys)).view(-1, 1).expand(rank.size()), rank] = 1
+            if mask is not None:
+                xs = xs * mask
+            if gauss_noise > 0:
+                xs = xs + torch.randn(*xs.shape).cuda() * gauss_noise
+            
+            xs = xs.view(batch_size, leak_batch, -1).mean(1)
+            ys = ys.view(batch_size, leak_batch, -1)
+            
+            noise = gradients_to_noise(xs, dim_z=128).to(device)
+            class_vector = cifar_to_imagenet_class(labels[:batch_num].cpu().numpy())
+            class_vector = torch.from_numpy(class_vector).to(device)
+            
+            fake_images = generator(noise, class_vector, truncation=0.4)
+            fake_images_resized = F.interpolate(fake_images, size=(32, 32))
+            
+            preds = fake_images_resized.view(batch_size, leak_batch, -1)
+            batch_wise_mse = (torch.cdist(ys, preds) ** 2) / image_size
+            loss = 0
+            for batch_id, mse_mat in enumerate(batch_wise_mse):
+                row_ind, col_ind = linear_sum_assignment(mse_mat.detach().cpu().numpy())
+                loss += mse_mat[row_ind, col_ind].sum()
+                # Save the reconstructed data in order
+                sorted_preds = preds[batch_id, col_ind]
+                sorted_preds[row_ind] = preds[batch_id, col_ind]
+                sorted_preds = sorted_preds.view(leak_batch, -1).detach().cpu()
+                reconstructed_data.append(sorted_preds)
+            total_loss += loss.item()
+    
+    reconstructed_data = torch.cat(reconstructed_data)
+    reconstructed_data = reconstructed_data.view(-1, 3, 32, 32)
+    total_loss = total_loss / total_num
+    return total_loss, reconstructed_data
+
+
+
+
 def test(grad_to_img_net, data_loader, sign=False, mask=None, prune_rate=None, leak_batch=1):
     grad_to_img_net.eval()
     total_loss = 0
@@ -140,6 +291,11 @@ def test(grad_to_img_net, data_loader, sign=False, mask=None, prune_rate=None, l
     reconstructed_data = reconstructed_data.view(-1, 3, 32, 32)
     total_loss = total_loss / total_num
     return total_loss, reconstructed_data
+
+
+
+
+
 
 #input the model shared among parties
 image_size = 3 * 32 * 32
@@ -212,9 +368,10 @@ if not os.path.exists(checkpoint_name):
     def leakage_dataset(data_loader):
         targets = torch.zeros([len(data_loader.dataset), image_size])
         features = torch.zeros([len(data_loader.dataset), model_size])
+        labels = torch.zeros(len(data_loader.dataset), dtype=torch.long)
 
-        for i, (images, labels) in enumerate(tqdm(data_loader)):
-            onehot_labels = label_to_onehot(labels, num_classes=num_classes)
+        for i, (images, labels_batch) in enumerate(tqdm(data_loader)):
+            onehot_labels = label_to_onehot(labels_batch, num_classes=num_classes)
             images, onehot_labels = images.cuda(), onehot_labels.cuda()
             pred = net(images)
             loss = criterion(pred, onehot_labels)
@@ -222,15 +379,19 @@ if not os.path.exists(checkpoint_name):
             original_dy_dx = torch.cat(list((_.detach().clone().view(-1) for _ in dy_dx)))
             targets[i] = images.view(-1)
             features[i] = original_dy_dx
-        return features, targets
-    #parallel saving
+            labels[i] = labels_batch
+        return features, targets, labels
+
+    # parallel saving
     checkpoint = {}
-    features, targets = leakage_dataset(train_loader)
-    checkpoint["train_features"] = features
-    checkpoint["train_targets"] = targets
-    features, targets = leakage_dataset(test_loader)
-    checkpoint["test_features"] = features
-    checkpoint["test_targets"] = targets
+    train_features, train_targets, train_labels = leakage_dataset(train_loader)
+    checkpoint["train_features"] = train_features
+    checkpoint["train_targets"] = train_targets
+    checkpoint["train_labels"] = train_labels
+    test_features, test_targets, test_labels = leakage_dataset(test_loader)
+    checkpoint["test_features"] = test_features
+    checkpoint["test_targets"] = test_targets
+    checkpoint["test_labels"] = test_labels
     dir_name = os.path.dirname(checkpoint_name)
     if not os.path.exists(dir_name):
         os.makedirs(dir_name)
@@ -241,8 +402,14 @@ del net
     
     
 print("loading dataset...")
-trainset = torch.utils.data.TensorDataset(checkpoint["train_features"], checkpoint["train_targets"])
-testset = torch.utils.data.TensorDataset(checkpoint["test_features"], checkpoint["test_targets"])
+# trainset = torch.utils.data.TensorDataset(checkpoint["train_features"], checkpoint["train_targets"])
+# testset = torch.utils.data.TensorDataset(checkpoint["test_features"], checkpoint["test_targets"])
+trainset = torch.utils.data.TensorDataset(checkpoint["train_features"], checkpoint["train_targets"], checkpoint["train_labels"])
+testset = torch.utils.data.TensorDataset(checkpoint["test_features"], checkpoint["test_targets"], checkpoint["test_labels"])
+
+train_loader = torch.utils.data.DataLoader(dataset=trainset, batch_size=args.batch_size, shuffle=True)
+test_loader = torch.utils.data.DataLoader(dataset=testset, batch_size=args.batch_size, shuffle=False)
+
 
 #leakage mode
 prune_rate = None
@@ -262,7 +429,7 @@ for i in range(len(leak_mode_list)):
 print(prune_rate, leak_batch, sign, gauss_noise)
 
 #init the model
-torch.manual_seed(0)
+torch.manual_seed(42)
 selected_para = torch.randperm(model_size)[:int(model_size * compress_rate)]
 if args.model.startswith("ResNet18"):
     base_model = resnet18(pretrained=True)
@@ -270,6 +437,9 @@ elif args.model.startswith("ResNet34"):
     base_model = resnet34(pretrained=True)
 elif args.model.startswith("ResNet50"):
     base_model = resnet50(pretrained=True)
+elif args.model.startswith("GAN"):
+    # Load pre-trained BigGAN model
+    grad_to_img_net = BigGAN.from_pretrained('biggan-deep-128').cuda()
 elif args.model.startswith("MLP"):
     hidden_size = int(args.model.split("-")[-1])
     grad_to_img_net = nn.Sequential(
@@ -284,10 +454,12 @@ elif args.model.startswith("MLP"):
 if args.model.startswith("ResNet"):
     grad_to_img_net = ModifiedResNet(base_model, len(selected_para), image_size).cuda()
     
+
 size = 0
 for parameters in grad_to_img_net.parameters():
     size += np.prod(parameters.size())
 print(f"net size: {size}")
+
 
 #training set-up
 lr = args.lr
@@ -319,41 +491,79 @@ if os.path.exists(checkpoint_name):
     print(checkpoint["test_loss"], checkpoint["best_test_loss"])
     exit()
 
-best_test_loss = 10000
-best_state_dict = None
-for epoch in tqdm(range(args.epochs)):
-    train_loss = train(grad_to_img_net, train_loader, sign, prune_rate=prune_rate, leak_batch=leak_batch)
-    test_loss, reconstructed_imgs = test(grad_to_img_net, test_loader, sign, prune_rate=prune_rate, leak_batch=leak_batch)
-    if test_loss < best_test_loss:
-        best_test_loss = test_loss
-        best_state_dict = deepcopy(grad_to_img_net.to("cpu").state_dict())
-    grad_to_img_net.to("cuda")
-    logger.info(f"epoch: {epoch}, train_loss: {train_loss}, test_loss: {test_loss}, best_test_loss: {best_test_loss}")
-    if (epoch+1)%100 == 0:
-        checkpoint = {}
-        checkpoint["train_loss"] = train_loss
-        checkpoint["test_loss"] = test_loss
-        checkpoint["reconstructed_imgs"] = reconstructed_imgs
-        checkpoint["gt_data"] = gt_data
-        
-        # Set the checkpoint name based on the training set
-        if args.trainset == "full":
-            checkpoint_name = f"checkpoint/{args.dataset}_{args.shared_model}_{args.model}_{args.leak_mode}_{args.lr}_{args.epochs}_{args.batch_size}_best.pt"
-        else:
-            checkpoint_name = f"checkpoint/{args.dataset}_{args.trainset}_{args.shared_model}_{args.model}_{args.leak_mode}_{args.lr}_{args.epochs}_{args.batch_size}.pt"
 
-        # Ensure the directory exists before saving
-        dir_name = os.path.dirname(checkpoint_name)
-        if not os.path.exists(dir_name):
-            os.makedirs(dir_name)
+if args.model.startswith("GAN"):
+    best_test_loss = 10000
+    best_state_dict = None
+    for epoch in tqdm(range(args.epochs)):
+        train_loss = train_GAN(grad_to_img_net, train_loader, sign, prune_rate=prune_rate, leak_batch=leak_batch)
+        test_loss, reconstructed_imgs = test_GAN(grad_to_img_net, test_loader, sign, prune_rate=prune_rate, leak_batch=leak_batch)
+        if test_loss < best_test_loss:
+            best_test_loss = test_loss
+            best_state_dict = deepcopy(grad_to_img_net.to("cpu").state_dict())
+        grad_to_img_net.to("cuda")
+        logger.info(f"epoch: {epoch}, train_loss: {train_loss}, test_loss: {test_loss}, best_test_loss: {best_test_loss}")
+        if (epoch+1)%100 == 0:
+            checkpoint = {}
+            checkpoint["train_loss"] = train_loss
+            checkpoint["test_loss"] = test_loss
+            checkpoint["reconstructed_imgs"] = reconstructed_imgs
+            checkpoint["gt_data"] = gt_data
+            
+            # Set the checkpoint name based on the training set
+            if args.trainset == "full":
+                checkpoint_name = f"checkpoint/{args.dataset}_{args.shared_model}_{args.model}_{args.leak_mode}_{args.lr}_{args.epochs}_{args.batch_size}_best.pt"
+            else:
+                checkpoint_name = f"checkpoint/{args.dataset}_{args.trainset}_{args.shared_model}_{args.model}_{args.leak_mode}_{args.lr}_{args.epochs}_{args.batch_size}.pt"
 
-        # Save the checkpoint
-        torch.save(checkpoint, checkpoint_name)
+            # Ensure the directory exists before saving
+            dir_name = os.path.dirname(checkpoint_name)
+            if not os.path.exists(dir_name):
+                os.makedirs(dir_name)
+
+            # Save the checkpoint
+            torch.save(checkpoint, checkpoint_name)
 
 
-    if (epoch+1) == int(0.75 * args.epochs):
-        for g in optimizer.param_groups:
-            g['lr'] *= 0.1
+        if (epoch+1) == int(0.75 * args.epochs):
+            for g in optimizer.param_groups:
+                g['lr'] *= 0.1
+else:
+    best_test_loss = 10000
+    best_state_dict = None
+    for epoch in tqdm(range(args.epochs)):
+        train_loss = train(grad_to_img_net, train_loader, sign, prune_rate=prune_rate, leak_batch=leak_batch)
+        test_loss, reconstructed_imgs = test(grad_to_img_net, test_loader, sign, prune_rate=prune_rate, leak_batch=leak_batch)
+        if test_loss < best_test_loss:
+            best_test_loss = test_loss
+            best_state_dict = deepcopy(grad_to_img_net.to("cpu").state_dict())
+        grad_to_img_net.to("cuda")
+        logger.info(f"epoch: {epoch}, train_loss: {train_loss}, test_loss: {test_loss}, best_test_loss: {best_test_loss}")
+        if (epoch+1)%100 == 0:
+            checkpoint = {}
+            checkpoint["train_loss"] = train_loss
+            checkpoint["test_loss"] = test_loss
+            checkpoint["reconstructed_imgs"] = reconstructed_imgs
+            checkpoint["gt_data"] = gt_data
+            
+            # Set the checkpoint name based on the training set
+            if args.trainset == "full":
+                checkpoint_name = f"checkpoint/{args.dataset}_{args.shared_model}_{args.model}_{args.leak_mode}_{args.lr}_{args.epochs}_{args.batch_size}_best.pt"
+            else:
+                checkpoint_name = f"checkpoint/{args.dataset}_{args.trainset}_{args.shared_model}_{args.model}_{args.leak_mode}_{args.lr}_{args.epochs}_{args.batch_size}.pt"
+
+            # Ensure the directory exists before saving
+            dir_name = os.path.dirname(checkpoint_name)
+            if not os.path.exists(dir_name):
+                os.makedirs(dir_name)
+
+            # Save the checkpoint
+            torch.save(checkpoint, checkpoint_name)
+
+
+        if (epoch+1) == int(0.75 * args.epochs):
+            for g in optimizer.param_groups:
+                g['lr'] *= 0.1
 
 
 # Determine the checkpoint file path based on the training set

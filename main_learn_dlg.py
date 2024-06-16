@@ -172,7 +172,7 @@ def train_GAN(generator, data_loader, optimizer, criterion, sign=False, mask=Non
         ys = ys.view(batch_size, leak_batch, -1)
         
         noise = gradients_to_noise(xs, dim_z=128).to(device)
-        class_vector = cifar_to_imagenet_class(labels[:batch_num].cpu().numpy())
+        class_vector = cifar_to_imagenet_class(labels.cpu().numpy())
         class_vector = torch.from_numpy(class_vector).to(device)
         
         fake_images = generator(noise, class_vector, truncation=0.4)
@@ -223,7 +223,7 @@ def test_GAN(generator, data_loader, criterion, sign=False, mask=None, prune_rat
             ys = ys.view(batch_size, leak_batch, -1)
             
             noise = gradients_to_noise(xs, dim_z=128).to(device)
-            class_vector = cifar_to_imagenet_class(labels[:batch_num].cpu().numpy())
+            class_vector = cifar_to_imagenet_class(labels.cpu().numpy())
             class_vector = torch.from_numpy(class_vector).to(device)
             
             fake_images = generator(noise, class_vector, truncation=0.4)

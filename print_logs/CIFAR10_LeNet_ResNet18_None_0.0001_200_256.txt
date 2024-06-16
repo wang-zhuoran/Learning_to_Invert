@@ -210,3 +210,5 @@
 [24-06-09 15:11:30 root] epoch: 197, train_loss: 0.014790692022442818, test_loss: 0.014806624901294708, best_test_loss: 0.014693494454026223
 [24-06-09 15:12:18 root] epoch: 198, train_loss: 0.014786200221478939, test_loss: 0.01476261429488659, best_test_loss: 0.014693494454026223
 [24-06-09 15:13:07 root] epoch: 199, train_loss: 0.014771735258102417, test_loss: 0.014662238422036171, best_test_loss: 0.014662238422036171
+[24-06-11 13:39:22 root] Namespace(dataset='CIFAR10', model='ResNet18', shared_model='LeNet', lr=0.0001, epochs=200, batch_size=256, leak_mode='None', trainset='full')
+[24-06-11 13:39:23 root] model size: 15826

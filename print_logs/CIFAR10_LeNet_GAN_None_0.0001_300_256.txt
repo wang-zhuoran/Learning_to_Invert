@@ -2,3 +2,54 @@
 [24-06-16 16:43:57 root] model size: 15826
 [24-06-16 16:52:35 root] Namespace(dataset='CIFAR10', model='GAN', shared_model='LeNet', lr=0.0001, epochs=300, batch_size=256, leak_mode='None', trainset='full')
 [24-06-16 16:52:37 root] model size: 15826
+[24-06-16 21:06:41 root] Namespace(dataset='CIFAR10', model='GAN', shared_model='LeNet', lr=0.0001, epochs=300, batch_size=256, leak_mode='None', trainset='full')
+[24-06-16 21:06:42 root] model size: 15826
+[24-06-16 21:07:31 root] Namespace(dataset='CIFAR10', model='GAN', shared_model='LeNet', lr=0.0001, epochs=300, batch_size=256, leak_mode='None', trainset='full')
+[24-06-16 21:07:32 root] model size: 15826
+[24-06-16 21:41:04 root] Namespace(dataset='CIFAR10', model='GAN', shared_model='LeNet', lr=0.0001, epochs=300, batch_size=256, leak_mode='None', trainset='full')
+[24-06-16 21:41:06 root] model size: 15826
+[24-06-16 21:42:05 root] Namespace(dataset='CIFAR10', model='GAN', shared_model='LeNet', lr=0.0001, epochs=300, batch_size=256, leak_mode='None', trainset='full')
+[24-06-16 21:42:07 root] model size: 15826
+[24-06-16 21:42:36 root] Namespace(dataset='CIFAR10', model='GAN', shared_model='LeNet', lr=0.0001, epochs=300, batch_size=256, leak_mode='None', trainset='full')
+[24-06-16 21:42:38 root] model size: 15826
+[24-06-16 21:50:38 root] Namespace(dataset='CIFAR10', model='GAN', shared_model='LeNet', lr=0.0001, epochs=300, batch_size=256, leak_mode='None', trainset='full')
+[24-06-16 21:50:39 root] model size: 15826
+[24-06-16 21:51:59 root] Namespace(dataset='CIFAR10', model='GAN', shared_model='LeNet', lr=0.0001, epochs=300, batch_size=256, leak_mode='None', trainset='full')
+[24-06-16 21:52:00 root] model size: 15826
+[24-06-16 21:54:04 root] Namespace(dataset='CIFAR10', model='GAN', shared_model='LeNet', lr=0.0001, epochs=300, batch_size=256, leak_mode='None', trainset='full')
+[24-06-16 21:54:05 root] model size: 15826
+[24-06-16 21:54:17 root] Namespace(dataset='CIFAR10', model='GAN', shared_model='LeNet', lr=0.0001, epochs=300, batch_size=256, leak_mode='None', trainset='full')
+[24-06-16 21:54:18 root] model size: 15826
+[24-06-16 22:00:11 root] Namespace(dataset='CIFAR10', model='GAN', shared_model='LeNet', lr=0.0001, epochs=300, batch_size=256, leak_mode='None', trainset='full')
+[24-06-16 22:00:12 root] model size: 15826
+[24-06-16 22:01:25 root] Namespace(dataset='CIFAR10', model='GAN', shared_model='LeNet', lr=0.0001, epochs=300, batch_size=256, leak_mode='None', trainset='full')
+[24-06-16 22:01:26 root] model size: 15826
+[24-06-16 22:03:46 root] Namespace(dataset='CIFAR10', model='GAN', shared_model='LeNet', lr=0.0001, epochs=300, batch_size=256, leak_mode='None', trainset='full')
+[24-06-16 22:03:47 root] model size: 15826
+[24-06-16 22:05:56 root] Namespace(dataset='CIFAR10', model='GAN', shared_model='LeNet', lr=0.0001, epochs=300, batch_size=256, leak_mode='None', trainset='full')
+[24-06-16 22:05:58 root] model size: 15826
+[24-06-16 22:10:18 root] Namespace(dataset='CIFAR10', model='GAN', shared_model='LeNet', lr=0.0001, epochs=300, batch_size=256, leak_mode='None', trainset='full')
+[24-06-16 22:10:19 root] model size: 15826
+[24-06-16 22:11:39 root] Namespace(dataset='CIFAR10', model='GAN', shared_model='LeNet', lr=0.0001, epochs=300, batch_size=256, leak_mode='None', trainset='full')
+[24-06-16 22:11:40 root] model size: 15826
+[24-06-16 22:13:05 root] epoch: 0, train_loss: 0.06741177079319954, test_loss: 0.06308011583089829, best_test_loss: 0.06308011583089829
+[24-06-16 22:14:20 root] epoch: 1, train_loss: 0.06292315193653107, test_loss: 0.06257204184532165, best_test_loss: 0.06257204184532165
+[24-06-16 22:15:36 root] epoch: 2, train_loss: 0.06266946917414665, test_loss: 0.0634301118850708, best_test_loss: 0.06257204184532165
+[24-06-16 22:16:53 root] epoch: 3, train_loss: 0.06262165524363518, test_loss: 0.06256055145263673, best_test_loss: 0.06256055145263673
+[24-06-16 22:18:10 root] epoch: 4, train_loss: 0.06246224930047989, test_loss: 0.062221338176727294, best_test_loss: 0.062221338176727294
+[24-06-16 22:19:27 root] epoch: 5, train_loss: 0.062451438598632815, test_loss: 0.06215449261665344, best_test_loss: 0.06215449261665344
+[24-06-16 22:20:45 root] epoch: 6, train_loss: 0.06243321240186691, test_loss: 0.06231503071784973, best_test_loss: 0.06215449261665344
+[24-06-16 22:22:03 root] epoch: 7, train_loss: 0.06237175589680672, test_loss: 0.062125271081924435, best_test_loss: 0.062125271081924435
+[24-06-16 22:23:22 root] epoch: 8, train_loss: 0.062334361040592194, test_loss: 0.06202007043361664, best_test_loss: 0.06202007043361664
+[24-06-16 22:24:39 root] epoch: 9, train_loss: 0.062330329228639604, test_loss: 0.062225209176540376, best_test_loss: 0.06202007043361664
+[24-06-16 22:25:57 root] epoch: 10, train_loss: 0.062394667406082155, test_loss: 0.06207742856740951, best_test_loss: 0.06202007043361664
+[24-06-16 22:27:15 root] epoch: 11, train_loss: 0.062275088510513305, test_loss: 0.062022092700004576, best_test_loss: 0.06202007043361664
+[24-06-16 22:28:33 root] epoch: 12, train_loss: 0.06226785207986832, test_loss: 0.06201634713411331, best_test_loss: 0.06201634713411331
+[24-06-16 22:29:51 root] epoch: 13, train_loss: 0.062261219042539596, test_loss: 0.06203730543851852, best_test_loss: 0.06201634713411331
+[24-06-16 22:31:10 root] epoch: 14, train_loss: 0.06228865864038467, test_loss: 0.06193472213745117, best_test_loss: 0.06193472213745117
+[24-06-16 22:32:28 root] epoch: 15, train_loss: 0.062268104877471926, test_loss: 0.06217420597076416, best_test_loss: 0.06193472213745117
+[24-06-16 22:33:46 root] epoch: 16, train_loss: 0.0622700366294384, test_loss: 0.06200164371728897, best_test_loss: 0.06193472213745117
+[24-06-16 22:35:05 root] epoch: 17, train_loss: 0.062231845996379855, test_loss: 0.061931156492233276, best_test_loss: 0.061931156492233276
+[24-06-16 22:36:23 root] epoch: 18, train_loss: 0.0622323369705677, test_loss: 0.06204748286008835, best_test_loss: 0.061931156492233276
+[24-06-16 22:37:41 root] epoch: 19, train_loss: 0.06223548786997795, test_loss: 0.06270842533111572, best_test_loss: 0.061931156492233276
+[24-06-16 22:39:00 root] epoch: 20, train_loss: 0.06225493396759033, test_loss: 0.06207702668905258, best_test_loss: 0.061931156492233276

@@ -24,50 +24,109 @@ from models.resnet import resnet20
 from logger import set_logger
 import torchvision.utils as vutils
 # import matplotlib.pyplot as plt
-from pytorch_pretrained_biggan import (BigGAN, one_hot_from_names, truncated_noise_sample,
-                                       save_as_images, display_in_terminal)
+# from pytorch_pretrained_biggan import (BigGAN, one_hot_from_names, truncated_noise_sample,
+                                    #    save_as_images, display_in_terminal)
 from torchvision.models import resnet18, resnet34, resnet50
 
-from pytorch_pretrained_biggan import one_hot_from_names
+# from pytorch_pretrained_biggan import one_hot_from_names
 
-# Utility function to convert gradients to noise vectors
-def gradients_to_noise(gradients, dim_z=128):
-    """Convert gradients to noise vectors."""
-    noise = gradients.view(-1, dim_z)
-    return noise
+def load_pretrained_weights(model, pretrained_path, model_name='Generator'):
+    pretrained_dict = torch.load(pretrained_path)
+    model_dict = model.state_dict()
 
-def cifar_to_imagenet_class(labels):
-    """
-    Convert CIFAR-10 labels to corresponding ImageNet class vectors.
-    
-    Args:
-    labels (list or np.array): List or array of CIFAR-10 labels (integers from 0 to 9).
-    
-    Returns:
-    np.array: One-hot encoded vectors for ImageNet classes.
-    """
-    # CIFAR-10 classes
-    cifar10_classes = [
-        'airplane', 'automobile', 'bird', 'cat', 'deer',
-        'dog', 'frog', 'horse', 'ship', 'truck'
-    ]
+    # Filter out unnecessary keys
+    pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict and model_dict[k].shape == v.shape}
 
-    # ImageNet classes corresponding to CIFAR-10 (approximate)
-    imagenet_classes = [
-        'airliner', 'sports car', 'robin', 'tabby cat', 'deer', 
-        'Labrador retriever', 'tree frog', 'Arabian camel', 'container ship', 'trailer truck'
-    ]
+    # Overwrite entries in the existing state dict
+    model_dict.update(pretrained_dict)
 
-    # Mapping from CIFAR-10 class index to ImageNet class name
-    cifar_to_imagenet_mapping = {i: imagenet_classes[i] for i in range(len(cifar10_classes))}
-    
-    # Convert CIFAR-10 labels to corresponding ImageNet class names
-    imagenet_labels = [cifar_to_imagenet_mapping[label] for label in labels]
-    
-    # Generate one-hot encoded class vectors for ImageNet classes
-    class_vector = one_hot_from_names(imagenet_labels, batch_size=len(labels))
-    
-    return class_vector
+    # Load the new state dict
+    model.load_state_dict(model_dict)
+
+
+
+
+class Generator(nn.Module):
+    def __init__(self, ngpu, nc=3, nz=100, ngf=64, input_dim=10000):
+        super(Generator, self).__init__()
+        self.ngpu = ngpu
+        self.nz = nz
+        self.input_dim = input_dim
+        self.hidden_size = 256  # example hidden size, adjust as necessary
+        self.linear1 = nn.Linear(input_dim, nz * 4 * 4)
+        self.relu1 = nn.ReLU(True)
+        self.main = nn.Sequential(
+            View(-1, nz, 4, 4),
+            nn.ConvTranspose2d(nz, ngf * 8, 4, 1, 0, bias=False),
+            nn.BatchNorm2d(ngf * 8),
+            nn.ReLU(True),
+            nn.ConvTranspose2d(ngf * 8, ngf * 4, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(ngf * 4),
+            nn.ReLU(True),
+            nn.ConvTranspose2d(ngf * 4, ngf * 2, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(ngf * 2),
+            nn.ReLU(True),
+            nn.ConvTranspose2d(ngf * 2, ngf, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(ngf),
+            nn.ReLU(True),
+            nn.ConvTranspose2d(ngf, nc, kernel_size=1, stride=1, padding=0, bias=False),
+            nn.Tanh()
+        )
+        self.output_layer = nn.Linear(9408, nc * 32 * 32)  # Adjusting to match output size
+
+    def forward(self, input):
+        input = self.relu1(self.linear1(input.view(input.size(0), -1)))
+        input = input.view(input.size(0), self.nz, 4, 4)
+        if input.is_cuda and self.ngpu > 1:
+            output = nn.parallel.data_parallel(self.main, input, range(self.ngpu))
+        else:
+            output = self.main(input)
+        output = output.view(output.size(0), -1)
+        output = self.output_layer(output)
+        output = output.view(output.size(0), 3, 32, 32)
+        return output
+
+class View(nn.Module):
+    def __init__(self, *shape):
+        super(View, self).__init__()
+        self.shape = shape
+
+    def forward(self, input):
+        return input.view(*self.shape)
+
+
+class Discriminator(nn.Module):
+    def __init__(self, ngpu, nc=3, ndf=64):
+        super(Discriminator, self).__init__()
+        self.ngpu = ngpu
+        self.main = nn.Sequential(
+            # input is (nc) x 64 x 64
+            nn.Conv2d(nc, ndf, 4, 2, 1, bias=False),
+            nn.LeakyReLU(0.2, inplace=True),
+            # state size. (ndf) x 32 x 32
+            nn.Conv2d(ndf, ndf * 2, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(ndf * 2),
+            nn.LeakyReLU(0.2, inplace=True),
+            # state size. (ndf*2) x 16 x 16
+            nn.Conv2d(ndf * 2, ndf * 4, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(ndf * 4),
+            nn.LeakyReLU(0.2, inplace=True),
+            # state size. (ndf*4) x 8 x 8
+            nn.Conv2d(ndf * 4, ndf * 8, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(ndf * 8),
+            nn.LeakyReLU(0.2, inplace=True),
+            # state size. (ndf*8) x 4 x 4
+            nn.Conv2d(ndf * 8, 1, 2, 2, 0, bias=False),
+            nn.Sigmoid()
+        )
+
+    def forward(self, input):
+        if input.is_cuda and self.ngpu > 1:
+            output = nn.parallel.data_parallel(self.main, input, range(self.ngpu))
+        else:
+            output = self.main(input)
+
+        return output.view(-1, 1).squeeze(1)
 
 
 
@@ -144,111 +203,6 @@ def train(grad_to_img_net, data_loader, sign=False, mask=None, prune_rate=None, 
     return total_loss
 
 
-def train_GAN(generator, data_loader, optimizer, criterion, sign=False, mask=None, prune_rate=None, leak_batch=1, device='cuda'):
-    generator.train()
-    total_loss = 0
-    total_num = 0
-    for i, (xs, ys, labels) in enumerate(tqdm(data_loader)):
-        optimizer.zero_grad()
-        batch_num = len(ys)
-        batch_size = int(batch_num / leak_batch)
-        batch_num = batch_size * leak_batch
-        total_num += batch_num
-        
-        xs, ys = xs[:batch_num].cuda(), ys[:batch_num].cuda()  # No need to select_para here
-        
-        if sign:
-            xs = torch.sign(xs)
-        if prune_rate is not None:
-            mask = torch.zeros(xs.size()).cuda()
-            rank = torch.argsort(xs.abs(), dim=1)[:, -int(xs.size()[1] * (1 - prune_rate)):]
-            mask[torch.arange(len(ys)).view(-1, 1).expand(rank.size()), rank] = 1
-        if mask is not None:
-            xs = xs * mask
-        if gauss_noise > 0:
-            xs = xs + torch.randn(*xs.shape).cuda() * gauss_noise
-        
-        xs = xs.view(batch_size, leak_batch, -1).mean(1)
-        ys = ys.view(batch_size, leak_batch, -1)
-        
-        noise = gradients_to_noise(xs, dim_z=128).to(device)
-        class_vector = cifar_to_imagenet_class(labels.cpu().numpy())
-        class_vector = torch.from_numpy(class_vector).to(device)
-        
-        fake_images = generator(noise, class_vector, truncation=0.4)
-        fake_images_resized = F.interpolate(fake_images, size=(32, 32))
-        
-        preds = fake_images_resized.view(batch_size, leak_batch, -1)
-        
-        batch_wise_mse = (torch.cdist(ys, preds) ** 2) / image_size
-        loss = 0
-        for mse_mat in batch_wise_mse:
-            row_ind, col_ind = linear_sum_assignment(mse_mat.detach().cpu().numpy())
-            loss += mse_mat[row_ind, col_ind].mean()
-        
-        loss /= batch_size
-        loss.backward()
-        optimizer.step()
-        total_loss += loss.item() * batch_num
-    
-    total_loss = total_loss / len(data_loader.dataset)
-    return total_loss
-
-def test_GAN(generator, data_loader, criterion, sign=False, mask=None, prune_rate=None, leak_batch=1, device='cuda'):
-    generator.eval()
-    total_loss = 0
-    total_num = 0
-    reconstructed_data = []
-    with torch.no_grad():
-        for i, (xs, ys, labels) in enumerate(tqdm(data_loader)):
-            batch_num = len(ys)
-            batch_size = int(batch_num / leak_batch)
-            batch_num = batch_size * leak_batch
-            total_num += batch_num
-            
-            xs, ys = xs[:batch_num].cuda(), ys[:batch_num].cuda()  # No need to select_para here
-            
-            if sign:
-                xs = torch.sign(xs)
-            if prune_rate is not None:
-                mask = torch.zeros(xs.size()).cuda()
-                rank = torch.argsort(xs.abs(), dim=1)[:, -int(xs.size()[1] * (1 - prune_rate)):]
-                mask[torch.arange(len(ys)).view(-1, 1).expand(rank.size()), rank] = 1
-            if mask is not None:
-                xs = xs * mask
-            if gauss_noise > 0:
-                xs = xs + torch.randn(*xs.shape).cuda() * gauss_noise
-            
-            xs = xs.view(batch_size, leak_batch, -1).mean(1)
-            ys = ys.view(batch_size, leak_batch, -1)
-            
-            noise = gradients_to_noise(xs, dim_z=128).to(device)
-            class_vector = cifar_to_imagenet_class(labels.cpu().numpy())
-            class_vector = torch.from_numpy(class_vector).to(device)
-            
-            fake_images = generator(noise, class_vector, truncation=0.4)
-            fake_images_resized = F.interpolate(fake_images, size=(32, 32))
-            
-            preds = fake_images_resized.view(batch_size, leak_batch, -1)
-            batch_wise_mse = (torch.cdist(ys, preds) ** 2) / image_size
-            loss = 0
-            for batch_id, mse_mat in enumerate(batch_wise_mse):
-                row_ind, col_ind = linear_sum_assignment(mse_mat.detach().cpu().numpy())
-                loss += mse_mat[row_ind, col_ind].sum()
-                # Save the reconstructed data in order
-                sorted_preds = preds[batch_id, col_ind]
-                sorted_preds[row_ind] = preds[batch_id, col_ind]
-                sorted_preds = sorted_preds.view(leak_batch, -1).detach().cpu()
-                reconstructed_data.append(sorted_preds)
-            total_loss += loss.item()
-    
-    reconstructed_data = torch.cat(reconstructed_data)
-    reconstructed_data = reconstructed_data.view(-1, 3, 32, 32)
-    total_loss = total_loss / total_num
-    return total_loss, reconstructed_data
-
-
-
 
 def test(grad_to_img_net, data_loader, sign=False, mask=None, prune_rate=None, leak_batch=1):
     grad_to_img_net.eval()
@@ -293,8 +247,91 @@ def test(grad_to_img_net, data_loader, sign=False, mask=None, prune_rate=None, l
     return total_loss, reconstructed_data
 
 
+def train_GAN(grad_to_img_net, data_loader, sign=False, mask=None, prune_rate=None, leak_batch=1, device='cuda'):
+    grad_to_img_net.train()
+    total_loss = 0
+    total_num = 0
+    for i, (xs, ys) in enumerate(tqdm(data_loader)):
+        optimizer.zero_grad()
+        batch_num = len(ys)
+        batch_size = int(batch_num / leak_batch)
+        batch_num = batch_size * leak_batch
+        total_num += batch_num
+        xs, ys = xs[:batch_num, selected_para].cuda(), ys[:batch_num].cuda()
+        if sign:
+            xs = torch.sign(xs)
+        if prune_rate is not None:
+            mask = torch.zeros(xs.size()).cuda()
+            rank = torch.argsort(xs.abs(), dim=1)[:,  -int(xs.size()[1] * (1 - prune_rate)):]
+            mask[torch.arange(len(ys)).view(-1, 1).expand(rank.size()), rank] = 1   
+        if mask is not None:
+            xs = xs * mask
+        if gauss_noise > 0:
+            xs = xs + torch.randn(*xs.shape).cuda() * gauss_noise
+        xs = xs.view(batch_size, leak_batch, -1).mean(1)
+        ys = ys.view(batch_size, leak_batch, -1)
+
+        preds = grad_to_img_net(xs).view(batch_size, leak_batch, -1)
+        
+        batch_wise_mse = (torch.cdist(ys, preds) ** 2) / image_size
+        loss = 0
+        for mse_mat in batch_wise_mse:
+            row_ind, col_ind = linear_sum_assignment(mse_mat.detach().cpu().numpy())
+            loss += mse_mat[row_ind, col_ind].mean()
+
+        loss /= batch_size
+        loss.backward()
+        optimizer.step()
+        total_loss += loss.item() * batch_num
+            
+    total_loss = total_loss / len(data_loader.dataset)
+    return total_loss
 
 
+
+def test_GAN(grad_to_img_net, data_loader, sign=False, mask=None, prune_rate=None, leak_batch=1, device='cuda'):
+    grad_to_img_net.eval()
+    total_loss = 0
+    total_num = 0
+    reconstructed_data = []
+    with torch.no_grad():
+        for i, (xs, ys) in enumerate(tqdm(data_loader)):
+            batch_num = len(ys)
+            batch_size = int(batch_num / leak_batch)
+            batch_num = batch_size * leak_batch
+            total_num += batch_num
+            xs, ys = xs[:batch_num, selected_para].cuda(), ys[:batch_num].cuda()
+            if sign:
+                xs = torch.sign(xs)
+            if prune_rate is not None:
+                mask = torch.zeros(xs.size()).cuda()
+                rank = torch.argsort(xs.abs(), dim=1)[:,  -int(xs.size()[1] * (1 - prune_rate)):]
+                mask[torch.arange(len(ys)).view(-1, 1).expand(rank.size()), rank] = 1   
+            if mask is not None:
+                xs = xs * mask
+            if gauss_noise > 0:
+                xs = xs + torch.randn(*xs.shape).cuda() * gauss_noise
+            xs = xs.view(batch_size, leak_batch, -1).mean(1)
+            ys = ys.view(batch_size, leak_batch, -1)
+
+            preds = grad_to_img_net(xs).view(batch_size, leak_batch, -1)
+
+            batch_wise_mse = (torch.cdist(ys, preds) ** 2) / image_size
+            loss = 0
+            for batch_id, mse_mat in enumerate(batch_wise_mse):
+                row_ind, col_ind = linear_sum_assignment(mse_mat.detach().cpu().numpy())
+                loss += mse_mat[row_ind, col_ind].sum()
+                #save the reconstructed data in order
+                sorted_preds = preds[batch_id, col_ind]
+                sorted_preds[row_ind] = preds[batch_id, col_ind]
+                sorted_preds = sorted_preds.view(leak_batch, -1).detach().cpu()
+                reconstructed_data.append(sorted_preds)
+            total_loss += loss.item()
+            
+    reconstructed_data = torch.cat(reconstructed_data)
+    reconstructed_data = reconstructed_data.view(-1, 3, 32, 32)
+    total_loss = total_loss / total_num
+    return total_loss, reconstructed_data
 
 
 #input the model shared among parties
@@ -311,6 +348,7 @@ model_size = 0
 for i, parameters in enumerate(net.parameters()):
     model_size += np.prod(parameters.size())
 logger.info(f"model size: {model_size}")
+
 
 # net.load_state_dict(torch.load("cifar_lenet.pth"))
 #generate training / test dataset
@@ -368,10 +406,9 @@ if not os.path.exists(checkpoint_name):
     def leakage_dataset(data_loader):
         targets = torch.zeros([len(data_loader.dataset), image_size])
         features = torch.zeros([len(data_loader.dataset), model_size])
-        labels = torch.zeros(len(data_loader.dataset), dtype=torch.long)
 
-        for i, (images, labels_batch) in enumerate(tqdm(data_loader)):
-            onehot_labels = label_to_onehot(labels_batch, num_classes=num_classes)
+        for i, (images, labels) in enumerate(tqdm(data_loader)):
+            onehot_labels = label_to_onehot(labels, num_classes=num_classes)
             images, onehot_labels = images.cuda(), onehot_labels.cuda()
             pred = net(images)
             loss = criterion(pred, onehot_labels)
@@ -379,22 +416,15 @@ if not os.path.exists(checkpoint_name):
             original_dy_dx = torch.cat(list((_.detach().clone().view(-1) for _ in dy_dx)))
             targets[i] = images.view(-1)
             features[i] = original_dy_dx
-            labels[i] = labels_batch
-        return features, targets, labels
-
-    # parallel saving
+        return features, targets
+    #parallel saving
     checkpoint = {}
-    train_features, train_targets, train_labels = leakage_dataset(train_loader)
-    checkpoint["train_features"] = train_features
-    checkpoint["train_targets"] = train_targets
-    checkpoint["train_labels"] = train_labels
-    test_features, test_targets, test_labels = leakage_dataset(test_loader)
-    checkpoint["test_features"] = test_features
-    checkpoint["test_targets"] = test_targets
-    checkpoint["test_labels"] = test_labels
-    dir_name = os.path.dirname(checkpoint_name)
-    if not os.path.exists(dir_name):
-        os.makedirs(dir_name)
+    features, targets = leakage_dataset(train_loader)
+    checkpoint["train_features"] = features
+    checkpoint["train_targets"] = targets
+    features, targets = leakage_dataset(test_loader)
+    checkpoint["test_features"] = features
+    checkpoint["test_targets"] = targets
     torch.save(checkpoint, checkpoint_name)
 else:
     checkpoint = torch.load(checkpoint_name)
@@ -402,13 +432,8 @@ del net
     
     
 print("loading dataset...")
-# trainset = torch.utils.data.TensorDataset(checkpoint["train_features"], checkpoint["train_targets"])
-# testset = torch.utils.data.TensorDataset(checkpoint["test_features"], checkpoint["test_targets"])
-trainset = torch.utils.data.TensorDataset(checkpoint["train_features"], checkpoint["train_targets"], checkpoint["train_labels"])
-testset = torch.utils.data.TensorDataset(checkpoint["test_features"], checkpoint["test_targets"], checkpoint["test_labels"])
-
-train_loader = torch.utils.data.DataLoader(dataset=trainset, batch_size=args.batch_size, shuffle=True)
-test_loader = torch.utils.data.DataLoader(dataset=testset, batch_size=args.batch_size, shuffle=False)
+trainset = torch.utils.data.TensorDataset(checkpoint["train_features"], checkpoint["train_targets"])
+testset = torch.utils.data.TensorDataset(checkpoint["test_features"], checkpoint["test_targets"])
 
 
 #leakage mode
@@ -439,7 +464,18 @@ elif args.model.startswith("ResNet50"):
     base_model = resnet50(pretrained=True)
 elif args.model.startswith("GAN"):
     # Load pre-trained BigGAN model
-    grad_to_img_net = BigGAN.from_pretrained('biggan-deep-128').cuda()
+    # Define your models
+    # D = Discriminator(ngpu=1, ndf=64)
+    G = Generator(ngpu=1, input_dim=len(selected_para))
+
+    # Load pretrained weights selectively
+    # load_pretrained_weights(D, 'weights/netD_epoch_199.pth', 'Discriminator')
+    load_pretrained_weights(G, 'weights/netG_epoch_199.pth', 'Generator')
+
+    if torch.cuda.is_available():
+        # D = D.cuda()
+        G = G.cuda()
+    grad_to_img_net = G
 elif args.model.startswith("MLP"):
     hidden_size = int(args.model.split("-")[-1])
     grad_to_img_net = nn.Sequential(
@@ -496,7 +532,7 @@ if args.model.startswith("GAN"):
     best_test_loss = 10000
     best_state_dict = None
     for epoch in tqdm(range(args.epochs)):
-        train_loss = train_GAN(grad_to_img_net, train_loader, optimizer, criterion, sign, prune_rate=prune_rate, leak_batch=leak_batch)
+        train_loss = train_GAN(grad_to_img_net, train_loader, criterion, sign, prune_rate=prune_rate, leak_batch=leak_batch)
         test_loss, reconstructed_imgs = test_GAN(grad_to_img_net, test_loader, criterion, sign, prune_rate=prune_rate, leak_batch=leak_batch)
         if test_loss < best_test_loss:
             best_test_loss = test_loss

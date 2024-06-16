@@ -465,7 +465,7 @@ print(f"net size: {size}")
 lr = args.lr
 epochs = args.epochs
 optimizer = torch.optim.Adam(grad_to_img_net.parameters(), lr=lr)
-    
+criterion = nn.MSELoss()
 #load the dataloader
 batch_size = args.batch_size
 train_loader = torch.utils.data.DataLoader(dataset=trainset,
@@ -496,8 +496,8 @@ if args.model.startswith("GAN"):
     best_test_loss = 10000
     best_state_dict = None
     for epoch in tqdm(range(args.epochs)):
-        train_loss = train_GAN(grad_to_img_net, train_loader, sign, prune_rate=prune_rate, leak_batch=leak_batch)
-        test_loss, reconstructed_imgs = test_GAN(grad_to_img_net, test_loader, sign, prune_rate=prune_rate, leak_batch=leak_batch)
+        train_loss = train_GAN(grad_to_img_net, train_loader, optimizer, criterion, sign, prune_rate=prune_rate, leak_batch=leak_batch)
+        test_loss, reconstructed_imgs = test_GAN(grad_to_img_net, test_loader, criterion, sign, prune_rate=prune_rate, leak_batch=leak_batch)
         if test_loss < best_test_loss:
             best_test_loss = test_loss
             best_state_dict = deepcopy(grad_to_img_net.to("cpu").state_dict())
